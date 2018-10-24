@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -360,6 +361,7 @@ func readInput(stdin *bufio.Scanner) (p Problem) {
 		areaDb.areaToCities[areaId] = cityIds
 
 	}
+	runtime.GC()
 	// read flights
 	for stdin.Scan() {
 		flightSplit(stdin.Text(), line)
@@ -407,6 +409,10 @@ func readInput(stdin *bufio.Scanner) (p Problem) {
 		flights = append(flights, f)
 		createIndexAD(indices.areaDayCost, fromArea, day, &f)
 		createIndexCD(indices.cityDayCost, from, day, &f)
+
+		if math.Mod(float64(day), 10) == 0 {
+			runtime.GC()
+		}
 
 	}
 	if length <= 20 {
