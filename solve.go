@@ -185,27 +185,34 @@ func (d *sa) run(comm comm) {
 	areadb := problem.areaDb
 	//temp := 0
 	maxCitySwap, maxAreaSwap := len(flights)-2, len(flights)-1
-	actions, action := 2, 0
 	for {
-		action = (action + 1) % actions
 		newBest := false
-		if action == 0 {
-			//don't swap first and last city
-			i, j := flightSwapIndices(maxCitySwap)
-			ok, newCost := swapFlights(current, g, i, j, false)
-			if ok && best > newCost {
-				best, newBest, current.totalCost = newCost, true, newCost
+		//don't swap first and last city
+		//i, j := randomFlightSwap(maxCitySwap)
+		i, j := bestFlightSwap(current, g, maxCitySwap)
+		ok, newCost := swapFlights(current, g, i, j, false)
+		if ok {
+			if best > newCost {
+				best, newBest = newCost, true
+				current.totalCost = newCost
+				swapFlights(current, g, i, j, true)
+			} else {
+				//TODO do this with some probability
+				current.totalCost = newCost
 				swapFlights(current, g, i, j, true)
 			}
-		} else {
-			//don't swap first city but can swap last city
-			ok, fi, ci := areaSwapIndex(maxAreaSwap, flights, areadb)
-			if !ok {
-				continue
-			}
-			ok, newCost := swapInArea(current, g, fi, ci, false)
-			if ok && best > newCost {
-				best, newBest, current.totalCost = newCost, true, newCost
+		}
+		//don't swap first city but can swap last city
+		fi, ci := randomAreaSwap(maxAreaSwap, flights, areadb)
+		ok, newCost = swapInArea(current, g, fi, ci, false)
+		if ok {
+			if best > newCost {
+				best, newBest = newCost, true
+				current.totalCost = newCost
+				swapInArea(current, g, fi, ci, true)
+			} else {
+				//TODO do this with some probability
+				current.totalCost = newCost
 				swapInArea(current, g, fi, ci, true)
 			}
 		}
@@ -225,6 +232,9 @@ a->X   X->c   c->d
 giPrev gi
 */
 func swapInArea(s Solution, g Graph, i int, x City, really bool) (bool, Money) {
+	if i == -1 {
+		return false, 0
+	}
 	flights := s.flights
 	prevI := i - 1
 	fiPrev := flights[prevI]
@@ -237,8 +247,6 @@ func swapInArea(s Solution, g Graph, i int, x City, really bool) (bool, Money) {
 		if really {
 			flights[prevI] = giPrev
 			flights[i] = gi
-			//			fmt.Fprintf(os.Stderr, "swapping in area from %v %v\n", fiPrev, fi)
-			//			fmt.Fprintf(os.Stderr, "swapping in area to   %v %v\n", giPrev, gi)
 		}
 		return true, s.totalCost - oldCost + newCost
 	}
@@ -254,6 +262,9 @@ a->d   d->c   c->b   b->a
 giPrev gi     gjPrev gj
 */
 func swapFlights(s Solution, g Graph, i, j int, really bool) (bool, Money) {
+	if i == -1 || j == -1 {
+		return false, 0
+	}
 	flights := s.flights
 	prevI := i - 1
 	prevJ := j - 1
@@ -273,16 +284,52 @@ func swapFlights(s Solution, g Graph, i, j int, really bool) (bool, Money) {
 			flights[i] = gi
 			flights[prevJ] = gjPrev
 			flights[j] = gj
-			//fmt.Fprintf(os.Stderr, "swapping from %v %v %v %v\n", fiPrev, fi, fjPrev, fj)
-			//fmt.Fprintf(os.Stderr, "swapping to   %v %v %v %v\n", giPrev, gi, gjPrev, gj)
 		}
 		return true, s.totalCost - oldCost + newCost
 	}
 	return false, 0
 }
 
+/*****************************************************************************/
+/* SA heuristics                                                             */
+/*****************************************************************************/
+
+//TODO: cache this function and flag when already tried something
+//maybe use the total solution cost and inteligently flight pointers
+func bestFlightSwap(s Solution, g Graph, max int) (int, int) {
+	bi, bj, best := -1, -1, Money(math.MaxInt32)
+	maxi := max - 1
+	for i := 1; i <= maxi; i++ {
+		for j := i + 1; j <= max; j++ {
+			ok, newCost := swapFlights(s, g, i, j, false)
+			if ok && best > newCost {
+				best, bi, bj = newCost, i, j
+			}
+		}
+	}
+	return bi, bj
+}
+
+//TODO: cache this function and flag when already tried something
+//maybe use the total solution cost and inteligently flight pointers
+func bestAreaSwap(s Solution, g Graph, max int, flights []*Flight, areadb AreaDb) (int, City) {
+	bfi, bci, best := -1, City(0), Money(math.MaxInt32)
+	for fi := 1; fi <= max; fi++ {
+		from := flights[fi].From
+		a := areadb.cityToArea[from]
+		area := areadb.areaToCities[a]
+		for _, ci := range area {
+			ok, newCost := swapInArea(s, g, fi, ci, false)
+			if ok && best > newCost {
+				best, bfi, bci = newCost, fi, ci
+			}
+		}
+	}
+	return bfi, bci
+}
+
 //TODO: could use some heuristics instead of random maybe
-func flightSwapIndices(n int) (int, int) {
+func randomFlightSwap(n int) (int, int) {
 	i := seed.Intn(n)
 	j := seed.Intn(n)
 	for ; j == i; j = seed.Intn(n) {
@@ -291,28 +338,29 @@ func flightSwapIndices(n int) (int, int) {
 }
 
 //TODO: could use some heuristics instead of random maybe
-func areaSwapIndex(n int, flights []*Flight, areadb AreaDb) (bool, int, City) {
+func randomAreaSwap(n int, flights []*Flight, areadb AreaDb) (int, City) {
 	fi := seed.Intn(n-1) + 1
 	from := flights[fi].From
 	a := areadb.cityToArea[from]
 	area := areadb.areaToCities[a]
 	if len(area) < 2 {
-		return false, 0, 0
+		return -1, 0
 	}
-	/*for _, city := range area {
-		fmt.Fprintf(os.Stderr, "area %v/%v contains %v/%v\n", a, problem.areaLookup.indexToName[a], city, problem.cityLookup.indexToName[city])
-	}*/
 	ci := seed.Intn(len(area))
 	max := 5
 	for ; area[ci] == from && max > 0; ci = seed.Intn(len(area)) {
 		max--
 	}
 	if max == 0 {
-		return false, 0, 0
+		return -1, 0
 	}
 
-	return true, fi, City(area[ci])
+	return fi, City(area[ci])
 }
+
+/*****************************************************************************/
+/* Greedy                                                                    */
+/*****************************************************************************/
 
 type Greedy struct {
 	graph       FlightIndices
