@@ -321,6 +321,28 @@ type Greedy struct {
 	endOnFirst  bool
 }
 
+type EvaluatedFlight struct {
+	flight Flight
+	value  float32
+}
+
+func insertSortedFlight(slice []EvaluatedFlight, node EvaluatedFlight) []EvaluatedFlight {
+	l := len(slice)
+	if l == 0 {
+		return []EvaluatedFlight{node}
+	}
+	i := sort.Search(l, func(i int) bool { return slice[i].value > node.value })
+	//fmt.Println(i)
+	if i == 0 {
+		return append([]EvaluatedFlight{node}, slice...)
+	}
+	if i == -1 {
+		return append(slice[0:l], node)
+	}
+	//tail := append([]EvaluatedFlight{node}, slice[i:]...)
+	return append(slice[0:i], append([]EvaluatedFlight{node}, slice[i:l]...)...)
+}
+
 func (d *Greedy) dfs(comm comm, partial *partial) {
 	if d.finished {
 		return
@@ -355,14 +377,22 @@ func (d *Greedy) dfs(comm comm, partial *partial) {
 		}
 		dst = d.graph.cityDayCost[lf.To][lf.Day+1]
 	}
+	possible_flights := make([]EvaluatedFlight, 0, MAX_CITIES)
 	for _, f := range dst {
-		partial.fly(f)
+		current_deal := float32(float32(f.Cost) + float32(f.Heuristic)*(1.0/float32(f.Day)))
+		//current_deal := float32(f.Cost)
+		//fmt.Fprintln(os.Stderr, current_deal)
+		possible_flights = insertSortedFlight(possible_flights, EvaluatedFlight{*f, current_deal})
+	}
+	for _, f := range possible_flights {
+		flight := f.flight
+		partial.fly(&flight)
 		d.dfs(comm, partial)
 		partial.backtrack()
 	}
 }
 func (d Greedy) Solve(comm comm) {
-	if len(problem.cityLookup.indexToName) > 10 {
+	if len(problem.cityLookup.indexToName) > 10000 {
 		d.endOnFirst = true
 	}
 	flights := make([]*Flight, 0, problem.length)
