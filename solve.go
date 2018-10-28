@@ -420,7 +420,7 @@ type FlightIndices struct {
 	cityDayCost [][][]*Flight // sorted by cost
 	fromDayTo   Graph         // not sorted
 	//dayArea     [][][]*Flight
-	//dayCity     [][][]*Flight
+	dayCity [][][]*Flight
 }
 
 type AreaDb struct {
@@ -535,6 +535,16 @@ func createIndexCD(slice [][][]*Flight, from City, day Day, flight *Flight) {
 	slice[from][day] = append(slice[from][day], flight)
 }
 
+func createIndexDC(slice [][][]*Flight, from City, day Day, flight *Flight) {
+	if slice[day] == nil {
+		slice[day] = make([][]*Flight, MAX_DAYS+1)
+	}
+	if slice[day][from] == nil {
+		slice[day][from] = make([]*Flight, 0, MAX_CITIES+1) // is there a max number of flights from a city on a date?
+	}
+	slice[day][from] = append(slice[day][from], flight)
+}
+
 func fromDayTo(slice [][][]*Flight, f *Flight) {
 	if slice[f.From] == nil {
 		slice[f.From] = make([][]*Flight, MAX_DAYS+1)
@@ -555,7 +565,7 @@ func readInput(stdin *bufio.Scanner) {
 	indices := &FlightIndices{make([][][]*Flight, MAX_AREAS),
 		make([][][]*Flight, MAX_CITIES),
 		make([][][]*Flight, MAX_CITIES),
-		//make([][][]*Flight, MAX_DAYS),
+		make([][][]*Flight, MAX_DAYS+1),
 		//make([][][]*Flight, MAX_DAYS),
 	}
 	line := make([]string, 4)
@@ -633,15 +643,18 @@ func readInput(stdin *bufio.Scanner) {
 				flights = append(flights, f)
 				createIndexAD(indices.areaDayCost, fromArea, Day(i), f)
 				createIndexCD(indices.cityDayCost, from, Day(i), f)
+				createIndexDC(indices.dayCity, from, Day(i), f)
 				fromDayTo(indices.fromDayTo, f)
 			}
 			continue
 		}
 
+		//fmt.Fprintln(os.Stderr, day)
 		f := &Flight{from, to, fromArea, toArea, day, cost, 0, 0.0}
 		flights = append(flights, f)
 		createIndexAD(indices.areaDayCost, fromArea, day, f)
 		createIndexCD(indices.cityDayCost, from, day, f)
+		createIndexDC(indices.dayCity, from, day, f)
 		fromDayTo(indices.fromDayTo, f)
 
 	}
@@ -677,6 +690,65 @@ func cost(path []*Flight) Money {
 	return cost
 }
 
+func buildHeuristics(g FlightIndices, p Problem) {
+	// evaluate each node in graph with best/worst price to reach final destination
+	for day := p.length; day > 0; day-- {
+		//fmt.Fprintln(os.Stderr, day)
+		for i, flights := range g.dayCity[day] {
+			if day == p.length {
+				//fmt.Fprintf(os.Stderr, "flights:", len(flights))
+				for j, f /*lights2*/ := range flights {
+					//for _, f := range flights2 {
+					//if g.dayCity[day][i][j] != nil {
+					g.dayCity[day][i][j].Heuristic = f.Cost
+					//fmt.Fprintf(os.Stderr, "heuristic", day, i, j, f.Cost)
+					//}
+					//}
+				}
+				continue
+			}
+			//for _, flights2 := range flights{
+			for j, f := range flights { //flights on day day, from j
+				best := Money(math.MaxInt32)
+				worst := Money(0)
+				//if g.dayCity[day+1] != nil && g.dayCity[day+1][f.To] != nil {
+				for _, f2 := range g.dayCity[day+1][f.To] {
+					if f2.To == f.From {
+						// avoid short cycles (how to avoid long ones?)
+						// printInfo("short cycle--", f, f2)
+						continue
+					}
+
+					if f2.Cost < best {
+						best = f2.Heuristic
+					}
+					if f2.Cost > worst {
+						worst = f2.Heuristic
+					}
+
+					//printInfo("candidate on", day, f, f2)
+				}
+				//}
+				//f.Heuristic = best
+				g.dayCity[day][i][j].Heuristic = (worst+best)/2 + f.Cost
+				//fmt.Fprintln(os.Stderr, "day", day, "from", i, "worst", worst, f)
+			}
+			//}
+			//printInfo(flights)
+		}
+		//printInfo("Day:", day, )
+	}
+	/*
+		for i, x := range g.dayFromData {
+			for j, y := range x {
+				for _, z := range y {
+					printInfo("[", i, j, "->", z.To, "]:", *z)
+					}
+				}
+			}
+	*/
+}
+
 func printSolution(s Solution) {
 	fmt.Println(s.totalCost)
 	for _, f := range s.flights {
@@ -684,6 +756,7 @@ func printSolution(s Solution) {
 			problem.cityLookup.indexToName[f.To],
 			f.Day,
 			f.Cost,
+			//f.Heuristic,
 		)
 	}
 }
@@ -743,6 +816,7 @@ func main() {
 	start_time := time.Now()
 	//defer profile.Start(profile.MemProfile).Stop()
 	readInput(bufio.NewScanner(os.Stdin))
+	buildHeuristics(problem.indices, problem)
 	g := Greedy{graph: problem.indices, currentBest: math.MaxInt32}
 	timeout := time.After(problem.timeLimit*time.Second - time.Since(start_time) - 45*time.Millisecond)
 	c := NewComm(timeout)
