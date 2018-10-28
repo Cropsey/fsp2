@@ -176,6 +176,8 @@ type sa struct {
 	areaDb AreaDb
 }
 
+//this should implement SA
+//for now, it selects the best neighbour always
 func (d *sa) run(comm comm) {
 	current := comm.current()
 	cost := current.totalCost
@@ -186,6 +188,7 @@ func (d *sa) run(comm comm) {
 	//temp := 0
 	maxCitySwap, maxAreaSwap := len(flights)-2, len(flights)-1
 	for {
+		//TODO this cycle should consider temperature, heating and cooling
 		newBest := false
 		//don't swap first and last city
 		//i, j := randomFlightSwap(maxCitySwap)
@@ -197,13 +200,14 @@ func (d *sa) run(comm comm) {
 				current.totalCost = newCost
 				swapFlights(current, g, i, j, true)
 			} else {
-				//TODO do this with some probability
+				//TODO do this with some probability based on heating/cooling
 				current.totalCost = newCost
 				swapFlights(current, g, i, j, true)
 			}
 		}
 		//don't swap first city but can swap last city
-		fi, ci := randomAreaSwap(maxAreaSwap, flights, areadb)
+		//fi, ci := randomAreaSwap(maxAreaSwap, flights, areadb)
+		fi, ci := bestAreaSwap(current, g, maxAreaSwap, flights, areadb)
 		ok, newCost = swapInArea(current, g, fi, ci, false)
 		if ok {
 			if best > newCost {
@@ -211,7 +215,7 @@ func (d *sa) run(comm comm) {
 				current.totalCost = newCost
 				swapInArea(current, g, fi, ci, true)
 			} else {
-				//TODO do this with some probability
+				//TODO do this with some probability based on heating/cooling
 				current.totalCost = newCost
 				swapInArea(current, g, fi, ci, true)
 			}
