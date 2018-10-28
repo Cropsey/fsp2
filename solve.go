@@ -679,11 +679,11 @@ func cost(path []*Flight) Money {
 
 func printSolution(s Solution) {
 	fmt.Println(s.totalCost)
-	for i := 0; i < problem.length; i++ {
-		fmt.Println(problem.cityLookup.indexToName[s.flights[i].From],
-			problem.cityLookup.indexToName[s.flights[i].To],
-			i+1,
-			s.flights[i].Cost,
+	for _, f := range s.flights {
+		fmt.Println(problem.cityLookup.indexToName[f.From],
+			problem.cityLookup.indexToName[f.To],
+			f.Day,
+			f.Cost,
 		)
 	}
 }
@@ -725,7 +725,7 @@ func validateSolution(s Solution) {
 			fmt.Fprintln(os.Stderr, f, "doesnt follow", prevF, "@", length)
 		}
 		if visited[f.ToArea] {
-			fmt.Fprintln(os.Stderr, f, "tries to revisit", problem.areaLookup.indexToName[f.To])
+			fmt.Fprintln(os.Stderr, f, "tries to revisit", problem.areaLookup.indexToName[f.ToArea])
 		}
 		length += 1
 		visited[f.ToArea] = true
