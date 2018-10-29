@@ -99,7 +99,7 @@ func (c *solutionComm) send(r Solution) Money {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 	if bullshit(r) {
-		panic("bullshit")
+		//panic("bullshit")
 		return c.best.totalCost
 	}
 	bestCost := c.best.totalCost
@@ -444,7 +444,7 @@ func (d *Greedy) dfs(comm comm, partial *partial) {
 	}
 }
 func (d Greedy) Solve(comm comm) {
-	if len(problem.cityLookup.indexToName) > 10000 {
+	if len(problem.cityLookup.indexToName) > 10000000 {
 		d.endOnFirst = true
 	}
 	flights := make([]*Flight, 0, problem.length)
@@ -811,8 +811,8 @@ func buildHeuristics(g FlightIndices, p Problem) {
 					//printInfo("candidate on", day, f, f2)
 				}
 				//}
-				//f.Heuristic = best
-				g.dayCity[day][i][j].Heuristic = (worst+best)/2 + f.Cost
+				g.dayCity[day][i][j].Heuristic = best
+				//g.dayCity[day][i][j].Heuristic = (worst+best)/2 + f.Cost
 				//fmt.Fprintln(os.Stderr, "day", day, "from", i, "worst", worst, f)
 			}
 			//}
