@@ -76,9 +76,10 @@ type solutionComm struct {
 	best        Solution
 	searchedAll chan bool
 	timeout     <-chan time.Time
+	startTime   time.Time
 }
 
-func NewComm(timeout <-chan time.Time) *solutionComm {
+func NewComm(timeout <-chan time.Time, startTime time.Time) *solutionComm {
 	initBest := Solution{}
 	initBest.totalCost = math.MaxInt32
 	return &solutionComm{
@@ -86,6 +87,7 @@ func NewComm(timeout <-chan time.Time) *solutionComm {
 		initBest,
 		make(chan bool),
 		timeout,
+		startTime,
 	}
 }
 func (c *solutionComm) current() Solution {
@@ -111,6 +113,7 @@ func (c *solutionComm) send(r Solution) Money {
 	copy(flights, r.flights)
 	sort.Sort(byDay(flights))
 	c.best = Solution{flights, r.totalCost}
+	fmt.Fprintln(os.Stderr, "new best", r.totalCost, "@", time.Since(c.startTime))
 	return r.totalCost
 }
 func (c *solutionComm) done() {
@@ -185,8 +188,11 @@ func (d *sa) run(comm comm) {
 	flights := current.flights
 	g := problem.indices.fromDayTo
 	areadb := problem.areaDb
-	//temp := 0
+	temp := 0.5
+	cooling := 0.1
+	heating := 0.6
 	maxCitySwap, maxAreaSwap := len(flights)-2, len(flights)-1
+	cycleCounter := 0
 	for {
 		//TODO this cycle should consider temperature, heating and cooling
 		newBest := false
@@ -199,10 +205,15 @@ func (d *sa) run(comm comm) {
 				best, newBest = newCost, true
 				current.totalCost = newCost
 				swapFlights(current, g, i, j, true)
+				temp += heating
 			} else {
 				//TODO do this with some probability based on heating/cooling
-				current.totalCost = newCost
-				swapFlights(current, g, i, j, true)
+				if seed.Float64() < temp {
+					current.totalCost = newCost
+					swapFlights(current, g, i, j, true)
+					temp -= cooling
+					fmt.Fprintln(os.Stderr, "Accepting worse solution at temp", temp, best, "->", newCost)
+				}
 			}
 		}
 		//don't swap first city but can swap last city
@@ -214,17 +225,27 @@ func (d *sa) run(comm comm) {
 				best, newBest = newCost, true
 				current.totalCost = newCost
 				swapInArea(current, g, fi, ci, true)
+				temp += heating
 			} else {
 				//TODO do this with some probability based on heating/cooling
-				current.totalCost = newCost
-				swapInArea(current, g, fi, ci, true)
+				if seed.Float64() < temp {
+					current.totalCost = newCost
+					swapInArea(current, g, fi, ci, true)
+					temp -= cooling
+				}
 			}
 		}
+		//fmt.Fprintln(os.Stderr, "-temp:", temp)
 		if newBest {
-			fmt.Fprintln(os.Stderr, "sa new solution", best)
+			fmt.Fprintln(os.Stderr, "sa new solution", best, temp)
 			best = comm.send(Solution{flights, best})
 		}
+		cycleCounter += 1
+		if cycleCounter%1000 == 0 {
+			fmt.Fprintln(os.Stderr, "cycles", cycleCounter)
+		}
 	}
+
 }
 
 /*
@@ -371,6 +392,7 @@ type Greedy struct {
 	currentBest Money
 	finished    bool
 	endOnFirst  bool
+	startTime   time.Time
 }
 
 type EvaluatedFlight struct {
@@ -444,7 +466,8 @@ func (d *Greedy) dfs(comm comm, partial *partial) {
 	}
 }
 func (d Greedy) Solve(comm comm) {
-	if len(problem.cityLookup.indexToName) > 10000000 {
+	//if len(problem.cityLookup.indexToName) > 10 {
+	if problem.length > 99 {
 		d.endOnFirst = true
 	}
 	flights := make([]*Flight, 0, problem.length)
@@ -458,9 +481,10 @@ func (d Greedy) Solve(comm comm) {
 		partial.backtrack()
 	}
 
-	if !d.endOnFirst {
+	if !d.endOnFirst || (time.Since(problem.startTime) < time.Duration(2500*time.Millisecond)) {
 		comm.done()
 	} else {
+		fmt.Fprintln(os.Stderr, "Switching to SA @", time.Since(problem.startTime))
 		sa := sa{}
 		sa.run(comm)
 	}
@@ -521,6 +545,7 @@ type Problem struct {
 	goal       Area
 	length     int
 	timeLimit  time.Duration
+	startTime  time.Time
 }
 
 type byCost []*Flight
@@ -639,7 +664,7 @@ func fromDayTo(slice [][][]*Flight, f *Flight) {
 	}
 }
 
-func readInput(stdin *bufio.Scanner) {
+func readInput(stdin *bufio.Scanner, startTime time.Time) {
 	lookupC := &LookupC{make(map[string]City), make([]string, 0, MAX_CITIES)}
 	lookupA := &LookupA{make(map[string]Area), make([]string, 0, MAX_AREAS)}
 	areaDb := &AreaDb{make(map[City]Area), make(map[Area][]City)}
@@ -761,7 +786,7 @@ func readInput(stdin *bufio.Scanner) {
 	}
 
 	problem = Problem{flights, *indices, *areaDb, *lookupA, *lookupC,
-		City(0), areaDb.cityToArea[City(0)], length, timeLimit}
+		City(0), areaDb.cityToArea[City(0)], length, timeLimit, startTime}
 }
 
 func cost(path []*Flight) Money {
@@ -897,11 +922,11 @@ func validateSolution(s Solution) {
 func main() {
 	start_time := time.Now()
 	//defer profile.Start(profile.MemProfile).Stop()
-	readInput(bufio.NewScanner(os.Stdin))
+	readInput(bufio.NewScanner(os.Stdin), start_time)
 	buildHeuristics(problem.indices, problem)
 	g := Greedy{graph: problem.indices, currentBest: math.MaxInt32}
-	timeout := time.After(problem.timeLimit*time.Second - time.Since(start_time) - 45*time.Millisecond)
-	c := NewComm(timeout)
+	timeout := time.After(problem.timeLimit*time.Second - time.Since(start_time) - 55*time.Millisecond)
+	c := NewComm(timeout, start_time)
 	go g.Solve(c)
 	c.wait()
 
