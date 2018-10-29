@@ -50,6 +50,21 @@ type Flight struct {
 	Penalty   float64
 }
 
+type FlightStats struct {
+	FlightCount uint16
+	BestPrice   Money
+	BestDay     Day
+	BestDest    City
+	AvgPrice    float32
+}
+
+type FlightStatistics struct {
+	ByDest       [][]FlightStats
+	ByDay        [][]FlightStats
+	TotalFlights uint32
+	AvgPrice     float32
+}
+
 func p(arr []string, i int) string {
 	if len(arr) > i {
 		return arr[i]
@@ -187,18 +202,19 @@ func (d *sa) run(comm comm) {
 	best := cost
 	flights := current.flights
 	g := problem.indices.fromDayTo
-	areadb := problem.areaDb
-	temp := 0.5
-	cooling := 0.1
-	heating := 0.6
-	maxCitySwap, maxAreaSwap := len(flights)-2, len(flights)-1
+	//areadb := problem.areaDb
+	temp := 0.8
+	cooling := 0.08
+	heating := 0.02
+	maxCitySwap := len(flights) - 2
+	//maxAreaSwap := len(flights)-1
 	cycleCounter := 0
 	for {
 		//TODO this cycle should consider temperature, heating and cooling
 		newBest := false
 		//don't swap first and last city
-		//i, j := randomFlightSwap(maxCitySwap)
-		i, j := bestFlightSwap(current, g, maxCitySwap)
+		i, j := randomFlightSwap(maxCitySwap)
+		//i, j := bestFlightSwap(current, g, maxCitySwap)
 		ok, newCost := swapFlights(current, g, i, j, false)
 		if ok {
 			if best > newCost {
@@ -218,23 +234,23 @@ func (d *sa) run(comm comm) {
 		}
 		//don't swap first city but can swap last city
 		//fi, ci := randomAreaSwap(maxAreaSwap, flights, areadb)
-		fi, ci := bestAreaSwap(current, g, maxAreaSwap, flights, areadb)
-		ok, newCost = swapInArea(current, g, fi, ci, false)
-		if ok {
-			if best > newCost {
-				best, newBest = newCost, true
-				current.totalCost = newCost
-				swapInArea(current, g, fi, ci, true)
-				temp += heating
-			} else {
-				//TODO do this with some probability based on heating/cooling
-				if seed.Float64() < temp {
+		/*	fi, ci := bestAreaSwap(current, g, maxAreaSwap, flights, areadb)
+			ok, newCost = swapInArea(current, g, fi, ci, false)
+			if ok {
+				if best > newCost {
+					best, newBest = newCost, true
 					current.totalCost = newCost
 					swapInArea(current, g, fi, ci, true)
-					temp -= cooling
+					temp += heating
+				} else {
+					//TODO do this with some probability based on heating/cooling
+					if seed.Float64() < temp {
+						current.totalCost = newCost
+						swapInArea(current, g, fi, ci, true)
+						temp -= cooling
+					}
 				}
-			}
-		}
+			} */
 		//fmt.Fprintln(os.Stderr, "-temp:", temp)
 		if newBest {
 			fmt.Fprintln(os.Stderr, "sa new solution", best, temp)
@@ -393,6 +409,7 @@ type Greedy struct {
 	finished    bool
 	endOnFirst  bool
 	startTime   time.Time
+	stats       FlightStatistics
 }
 
 type EvaluatedFlight struct {
@@ -453,7 +470,14 @@ func (d *Greedy) dfs(comm comm, partial *partial) {
 	}
 	possible_flights := make([]EvaluatedFlight, 0, MAX_CITIES)
 	for _, f := range dst {
-		current_deal := float32(float32(f.Cost) + float32(f.Heuristic)*(1.0/float32(f.Day)))
+		s := d.stats.ByDest[lf.To][f.To]
+		discount := s.AvgPrice - float32(f.Cost)
+		discount_rate := discount / float32(f.Cost)
+		if f.Cost > 650 && discount_rate < -0.3 {
+			// no discount, no deal, bro
+			continue
+		}
+		current_deal := float32(float32(f.Cost)+float32(f.Heuristic)*(1.0/float32(f.Day))) - 0.6*discount
 		//current_deal := float32(f.Cost)
 		//fmt.Fprintln(os.Stderr, current_deal)
 		possible_flights = insertSortedFlight(possible_flights, EvaluatedFlight{*f, current_deal})
@@ -546,6 +570,7 @@ type Problem struct {
 	length     int
 	timeLimit  time.Duration
 	startTime  time.Time
+	stats      FlightStatistics
 }
 
 type byCost []*Flight
@@ -664,6 +689,31 @@ func fromDayTo(slice [][][]*Flight, f *Flight) {
 	}
 }
 
+func updateStats(stats *FlightStatistics, from, to City, day Day, cost Money) {
+	// Destination stats
+	if stats.ByDest[from][to].BestPrice == Money(0) || stats.ByDest[from][to].BestPrice > cost {
+		stats.ByDest[from][to].BestPrice = cost
+		stats.ByDest[from][to].BestDay = day
+		stats.ByDest[from][to].BestDest = to
+	}
+	stats.ByDest[from][to].AvgPrice = (stats.ByDest[from][to].AvgPrice*float32(stats.ByDest[from][to].FlightCount) +
+		float32(cost)) / float32(stats.ByDest[from][to].FlightCount+1)
+	stats.ByDest[from][to].FlightCount += 1
+	// Day based stats
+	if stats.ByDay[from][day].BestPrice == Money(0) || stats.ByDay[from][day].BestPrice > cost {
+		stats.ByDay[from][day].BestPrice = cost
+		stats.ByDay[from][day].BestDest = to
+		stats.ByDay[from][day].BestDay = day
+	}
+	stats.ByDay[from][day].AvgPrice = (stats.ByDay[from][day].AvgPrice*float32(stats.ByDay[from][day].FlightCount) +
+		float32(cost)) / float32(stats.ByDay[from][day].FlightCount+1)
+	stats.ByDay[from][day].FlightCount += 1
+	// Common stats
+	stats.AvgPrice = (stats.AvgPrice*float32(stats.TotalFlights) + float32(cost)) / float32(stats.TotalFlights+1)
+	stats.TotalFlights += 1
+
+}
+
 func readInput(stdin *bufio.Scanner, startTime time.Time) {
 	lookupC := &LookupC{make(map[string]City), make([]string, 0, MAX_CITIES)}
 	lookupA := &LookupA{make(map[string]Area), make([]string, 0, MAX_AREAS)}
@@ -674,6 +724,16 @@ func readInput(stdin *bufio.Scanner, startTime time.Time) {
 		make([][][]*Flight, MAX_CITIES),
 		make([][][]*Flight, MAX_DAYS+1),
 		//make([][][]*Flight, MAX_DAYS),
+	}
+	//stats := &FlightStatistics{}
+	stats := &FlightStatistics{make([][]FlightStats, MAX_CITIES),
+		make([][]FlightStats, MAX_CITIES), 0, 0}
+
+	for s := range stats.ByDest {
+		stats.ByDest[s] = make([]FlightStats, MAX_CITIES)
+	}
+	for s := range stats.ByDay {
+		stats.ByDay[s] = make([]FlightStats, MAX_DAYS+1)
 	}
 	line := make([]string, 4)
 
@@ -752,6 +812,7 @@ func readInput(stdin *bufio.Scanner, startTime time.Time) {
 				createIndexCD(indices.cityDayCost, from, Day(i), f)
 				createIndexDC(indices.dayCity, from, Day(i), f)
 				fromDayTo(indices.fromDayTo, f)
+				updateStats(stats, from, to, Day(i), cost)
 			}
 			continue
 		}
@@ -763,6 +824,7 @@ func readInput(stdin *bufio.Scanner, startTime time.Time) {
 		createIndexCD(indices.cityDayCost, from, day, f)
 		createIndexDC(indices.dayCity, from, day, f)
 		fromDayTo(indices.fromDayTo, f)
+		updateStats(stats, from, to, day, cost)
 
 	}
 	if length <= 20 {
@@ -786,7 +848,7 @@ func readInput(stdin *bufio.Scanner, startTime time.Time) {
 	}
 
 	problem = Problem{flights, *indices, *areaDb, *lookupA, *lookupC,
-		City(0), areaDb.cityToArea[City(0)], length, timeLimit, startTime}
+		City(0), areaDb.cityToArea[City(0)], length, timeLimit, startTime, *stats}
 }
 
 func cost(path []*Flight) Money {
@@ -924,7 +986,7 @@ func main() {
 	//defer profile.Start(profile.MemProfile).Stop()
 	readInput(bufio.NewScanner(os.Stdin), start_time)
 	buildHeuristics(problem.indices, problem)
-	g := Greedy{graph: problem.indices, currentBest: math.MaxInt32}
+	g := Greedy{graph: problem.indices, currentBest: math.MaxInt32, stats: problem.stats}
 	timeout := time.After(problem.timeLimit*time.Second - time.Since(start_time) - 55*time.Millisecond)
 	c := NewComm(timeout, start_time)
 	go g.Solve(c)
